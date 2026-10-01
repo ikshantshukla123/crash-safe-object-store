@@ -1,0 +1,22 @@
+# Secrets — never commit. Only .env.example belongs in git.
+.env
+*.pem
+*.key
+
+# Go build output
+/bin/
+*.test
+*.out
+
+# Local data volumes (Postgres, WAL, node chunk dirs)
+/data/
+/srv/
+
+# Frontend
+dashboard/node_modules/
+dashboard/dist/
+
+# Editor / OS
+.DS_Store
+.idea/
+*.swp
