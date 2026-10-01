@@ -1,0 +1,24 @@
+version: "2"
+
+# Linters chosen for the failure modes this project actually has:
+# leaked HTTP bodies when talking to storage nodes, swallowed errors, and
+# error wrapping (CLAUDE.md §14).
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - rowserrcheck
+    - sqlclosecheck
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
