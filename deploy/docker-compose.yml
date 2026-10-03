@@ -1,0 +1,92 @@
+# Local development stack. Production reuses this file unchanged and layers
+# deploy/docker-compose.prod.yml on top (CLAUDE.md §17 parity).
+#
+# Image tags are pinned, never `latest`, so a rebuild cannot silently change
+# the database version underneath the data volume.
+
+name: objstore
+
+services:
+  postgres:
+    # pgvector image rather than plain postgres: it bundles the vector
+    # extension needed in Phase 10, and ships pg_trgm like any Postgres.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-objstore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-objstore}
+    ports:
+      # Published for local psql and host-run tests only. The prod overlay
+      # removes this: forbids exposing Postgres on the host.
+      #
+      # Host port is configurable and defaults to 5433 so it cannot collide
+      # with a Postgres already installed natively on the developer's machine.
+      # The container port stays 5432, so service-to-service URLs are
+      # unaffected.
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-objstore} -d ${POSTGRES_DB:-objstore}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    # One-shot: runs to completion, then exits. The api service waits for it
+    # to succeed, so the schema is never behind the code (§17 deploy flow).
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./db/migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://${POSTGRES_USER:-objstore}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-objstore}?sslmode=disable"
+      - "up"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CMD_NAME: api
+    environment:
+      API_ADDR: ":8080"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      # Service names resolve on the Compose network; no host ports involved.
+      DATABASE_URL: postgres://${POSTGRES_USER:-objstore}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-objstore}?sslmode=disable
+      REDIS_ADDR: redis:6379
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pgdata:
+  redisdata:

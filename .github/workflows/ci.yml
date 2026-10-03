@@ -54,6 +54,17 @@ jobs:
             echo "These files need gofmt:"; echo "$unformatted"; exit 1
           fi
 
+      # Catches the classic mistake: editing db/queries but forgetting to
+      # regenerate, so the typed Go code silently disagrees with the SQL.
+      - name: Check sqlc output is up to date
+        run: |
+          make sqlc
+          if ! git diff --quiet -- internal/db; then
+            echo "sqlc output is stale. Run 'make sqlc' and commit the result:"
+            git diff -- internal/db
+            exit 1
+          fi
+
       - name: Vet and test
         run: make test
 
