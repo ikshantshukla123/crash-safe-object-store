@@ -3,6 +3,7 @@
 *.pem
 *.key
 
+CLAUDE.md
 # Go build output
 /bin/
 *.test

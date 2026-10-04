@@ -12,7 +12,7 @@ deliberately.
 
 ## Decision
 
-Every locked decision in CLAUDE.md §3 gets a numbered file in `docs/decisions/`.
+Every locked architecture decision gets a numbered file in `docs/decisions/`.
 Each one states the context, the decision, what it costs us, and what we
 rejected. Files are append-only: to change a decision, add a new record that
 supersedes the old one rather than editing history.

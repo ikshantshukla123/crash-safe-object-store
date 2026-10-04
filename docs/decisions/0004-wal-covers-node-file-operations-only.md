@@ -1,6 +1,6 @@
 # 0004 — The WAL covers storage-node file operations only
 
-Status: accepted · Date: 2026-10-01 · Implements: CLAUDE.md §3.1, §6, §8
+Status: accepted · Date: 2026-10-01
 
 ## Context
 
@@ -21,7 +21,7 @@ operations on storage nodes:
 
 - Records: `BEGIN_PUT`, `COMMIT_PUT`, `ABORT_PUT`, `BEGIN_DELETE`,
   `DONE_DELETE`, `CHECKPOINT`.
-- `BEGIN_*` is appended **and fsynced before any node is touched** (§6 step 5).
+- `BEGIN_*` is appended **and fsynced before any node is touched**.
   `COMMIT`/`ABORT`/`DONE` need not be fsynced — their absence is recoverable.
 - The WAL stores intent, **never chunk bytes**.
 - There is no WAL in front of Postgres. Postgres transactions cover metadata.
@@ -30,7 +30,7 @@ The ordering is what buys safety: because intent is durable before the first
 byte reaches a node, replay can always find in-doubt operations. It can never
 encounter a file it has no record of.
 
-## Replay (§8)
+## Replay
 
 Read segments in order; stop and truncate at the first short read or bad CRC
 **at the tail** (that is a torn write from the crash — expected, fine). A bad

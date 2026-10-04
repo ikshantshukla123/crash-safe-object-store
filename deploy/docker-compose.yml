@@ -1,5 +1,5 @@
 # Local development stack. Production reuses this file unchanged and layers
-# deploy/docker-compose.prod.yml on top (CLAUDE.md §17 parity).
+# deploy/docker-compose.prod.yml on top, keeping local and production in parity.
 #
 # Image tags are pinned, never `latest`, so a rebuild cannot silently change
 # the database version underneath the data volume.
@@ -46,7 +46,7 @@ services:
 
   migrate:
     # One-shot: runs to completion, then exits. The api service waits for it
-    # to succeed, so the schema is never behind the code (§17 deploy flow).
+    # to succeed, so the schema is never behind the code.
     image: migrate/migrate:v4.18.1
     depends_on:
       postgres:

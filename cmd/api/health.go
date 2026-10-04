@@ -22,12 +22,12 @@ type healthResponse struct {
 // handleHealth reports whether this process can reach its dependencies.
 //
 // This is a readiness check, not a liveness check: it returns 503 when
-// Postgres or Redis is unreachable. deploy/smoke.sh (§17) and the Compose
+// Postgres or Redis is unreachable. deploy/smoke.sh and the Compose
 // healthchecks both rely on that distinction, and reporting "ok" while the
 // database is down would make every other signal untrustworthy.
 //
 // Note that a Redis failure also degrades health even though Redis is only
-// derived data (§3.1). It is reported so the operator sees it; whether reads
+// derived data. It is reported so the operator sees it; whether reads
 // should still be served from Postgres alone is a Phase 7 decision.
 func handleHealth(log *slog.Logger, q *dbgen.Queries, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

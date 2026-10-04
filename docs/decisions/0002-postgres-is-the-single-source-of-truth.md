@@ -1,6 +1,6 @@
 # 0002 — Postgres is the single source of truth
 
-Status: accepted · Date: 2026-10-01 · Implements: CLAUDE.md §3.1
+Status: accepted · Date: 2026-10-01
 
 ## Context
 
@@ -15,7 +15,7 @@ to decide which to believe. There is no correct answer at read time.
 
 ## Decision
 
-Exactly one owner per fact (CLAUDE.md §3.1):
+Exactly one owner per fact:
 
 | Fact | Owner |
 |---|---|
@@ -37,7 +37,7 @@ may be stale, it may be wiped, and the system must still be correct.
 - Node up/down has exactly one writer, so there is no race between a worker
   marking a node down and the health checker marking it up.
 - Cost: Postgres is on the hot path for every read. Mitigated by caching, but
-  deliberately *not* by giving the cache authority (see §11: we cache immutable
+  deliberately *not* by giving the cache authority (we cache immutable
   data by immutable ID, and we **delete** the mutable pointer after commit
   rather than updating it in place).
 

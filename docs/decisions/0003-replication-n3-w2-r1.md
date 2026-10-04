@@ -1,6 +1,6 @@
 # 0003 — Replication: N=3, W=2, R=1 verified, single coordinator
 
-Status: accepted · Date: 2026-10-01 · Implements: CLAUDE.md §3.2
+Status: accepted · Date: 2026-10-01
 
 ## Context
 

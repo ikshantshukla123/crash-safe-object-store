@@ -2,7 +2,7 @@ version: "2"
 
 # Linters chosen for the failure modes this project actually has:
 # leaked HTTP bodies when talking to storage nodes, swallowed errors, and
-# error wrapping (CLAUDE.md §14).
+# error wrapping.
 linters:
   default: standard
   enable:

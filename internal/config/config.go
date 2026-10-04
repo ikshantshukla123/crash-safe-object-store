@@ -2,7 +2,7 @@
 //
 // Values are read once at startup and passed explicitly to the components that
 // need them, rather than being reachable from anywhere via a package-level
-// variable (CLAUDE.md §14: no global mutable state). Each phase adds only the
+// variable, which avoids global mutable state. Each phase adds only the
 // settings it actually uses.
 package config
 

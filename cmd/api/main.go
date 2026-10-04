@@ -1,4 +1,4 @@
-// Command api is the HTTP API and the single write coordinator (CLAUDE.md §3.2).
+// Command api is the HTTP API and the single write coordinator.
 //
 // Phase 1 is the walking skeleton: configuration, structured logging, a
 // Postgres pool, a Redis client, and /health. Object and bucket routes arrive
@@ -121,7 +121,7 @@ func newRouter(log *slog.Logger, q *dbgen.Queries, rdb *redis.Client) http.Handl
 	r := chi.NewRouter()
 
 	// RequestID first: everything downstream, including the panic recoverer,
-	// should be able to quote the same op_id (§14).
+	// should be able to quote the same op_id.
 	//
 	// chi's RealIP is deliberately absent: it is deprecated and spoofable,
 	// since it trusts X-Forwarded-For regardless of whether a proxy set it.

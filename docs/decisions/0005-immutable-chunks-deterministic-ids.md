@@ -1,6 +1,6 @@
 # 0005 — Immutable chunks with deterministic IDs
 
-Status: accepted · Date: 2026-10-01 · Implements: CLAUDE.md §3.3, §7
+Status: accepted · Date: 2026-10-01
 
 ## Context
 
@@ -38,7 +38,7 @@ at 16 MiB; a small PUT is internally init + one part + complete, so there is
 Immutability plus content addressing removes whole categories of problem:
 
 - **Caching needs no invalidation.** `obj:{versionId}` can never go stale,
-  because that version's bytes cannot change (§11).
+  because that version's bytes cannot change.
 - **R=1 reads are safe.** There is no "older copy" of a chunk to accidentally
   read — only a correct copy or a corrupt one, and the hash tells us which
   (see 0003).
@@ -46,7 +46,7 @@ Immutability plus content addressing removes whole categories of problem:
 - **A node can safely answer a duplicate PUT**: same checksum → 200, different
   checksum for an existing ID → 409. That 409 is a real bug signal, not a race.
 
-## Supporting rules (§7)
+## Supporting idempotency rules
 
 - Absolute updates (`set status = healthy`), never relative ones (`increment`).
   Relative updates are not idempotent.
@@ -79,4 +79,4 @@ Immutability plus content addressing removes whole categories of problem:
   unsafe, and turns repair into conflict resolution.
 - **Global content-addressing (`chunk_id = sha256`) shared across uploads.**
   Real dedupe, but it forces reference counting and makes delete dangerous —
-  explicitly out of scope per §3.4.
+  explicitly out of scope.

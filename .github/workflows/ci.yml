@@ -18,8 +18,8 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     services:
-      # A real Postgres, not a mock — CLAUDE.md §15 requires it for anything
-      # touching constraints or transactions. pgvector image also ships pg_trgm.
+      # A real Postgres, not a mock: anything touching SQL constraints or
+      # transactions needs the real thing. This image also ships pg_trgm.
       postgres:
         image: pgvector/pgvector:pg16
         env:

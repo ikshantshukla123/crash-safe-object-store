@@ -10,9 +10,8 @@ import (
 
 // requestLogger emits one structured line per request.
 //
-// Every line carries op_id, taken from chi's RequestID. CLAUDE.md §14 requires
-// that a single write can be traced across the API, the WAL and the node logs,
-// and a shared op_id is what makes that possible.
+// Every line carries op_id, taken from chi's RequestID, so a single write can
+// be traced across the API, the write-ahead log and the storage node logs.
 func requestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

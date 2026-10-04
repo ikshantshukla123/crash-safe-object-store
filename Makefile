@@ -1,4 +1,4 @@
-# Crash-safe object store — developer entry points (CLAUDE.md §5).
+# Crash-safe object store — developer entry points.
 # Indented recipe lines must be TABS; this file is generated with tabs.
 
 SQLC_VERSION := 1.27.0
@@ -17,7 +17,7 @@ up: ## Start the full Compose stack
 down: ## Stop the stack
 	$(COMPOSE) down
 
-migrate: ## Apply database migrations (forward-only, §14)
+migrate: ## Apply database migrations (forward-only)
 	migrate -path db/migrations -database "$$DATABASE_URL" up
 
 sqlc: ## Regenerate typed queries from db/queries
@@ -38,11 +38,11 @@ test: ## go vet + full test suite
 lint: ## Static analysis
 	golangci-lint run ./...
 
-crash-test: ## WAL crash-injection harness (§15)
+crash-test: ## WAL crash-injection harness
 	go test ./internal/wal/... -run Crash -count=1
 
-e2e: ## Compose-based failure scenarios: kill node, heal, replay (§15)
+e2e: ## Compose-based failure scenarios: kill node, heal, replay
 	go test ./test/e2e/... -tags=e2e -count=1
 
-compose-config: ## Assert the prod compose overlay still merges cleanly (§17 parity)
+compose-config: ## Assert the prod compose overlay still merges cleanly
 	$(COMPOSE_PROD) config > /dev/null && echo "compose config OK"
