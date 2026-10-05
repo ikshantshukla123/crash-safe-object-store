@@ -1,0 +1,8 @@
+DROP TABLE IF EXISTS upload_parts;
+DROP TABLE IF EXISTS multipart_uploads;
+DROP TABLE IF EXISTS chunks;
+ALTER TABLE IF EXISTS objects DROP CONSTRAINT IF EXISTS objects_current_version_fk;
+DROP TABLE IF EXISTS object_versions;
+DROP TABLE IF EXISTS objects;
+DROP TABLE IF EXISTS buckets;
+DROP TABLE IF EXISTS users;

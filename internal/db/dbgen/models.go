@@ -3,3 +3,71 @@
 //   sqlc v1.27.0
 
 package dbgen
+
+import (
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+type Bucket struct {
+	ID        pgtype.UUID
+	Name      string
+	OwnerID   pgtype.UUID
+	CreatedAt pgtype.Timestamptz
+}
+
+type Chunk struct {
+	ID         pgtype.UUID
+	VersionID  pgtype.UUID
+	ChunkIndex int32
+	SizeBytes  int64
+	Sha256     string
+	State      string
+	CreatedAt  pgtype.Timestamptz
+}
+
+type MultipartUpload struct {
+	ID                 pgtype.UUID
+	BucketID           pgtype.UUID
+	Key                string
+	ContentType        string
+	Status             string
+	CompletedVersionID pgtype.UUID
+	CreatedAt          pgtype.Timestamptz
+	ExpiresAt          pgtype.Timestamptz
+}
+
+type Object struct {
+	ID               pgtype.UUID
+	BucketID         pgtype.UUID
+	Key              string
+	CurrentVersionID pgtype.UUID
+	LastVersionNo    int64
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
+type ObjectVersion struct {
+	ID             pgtype.UUID
+	ObjectID       pgtype.UUID
+	VersionNo      int64
+	SizeBytes      int64
+	Checksum       string
+	ContentType    string
+	IsDeleteMarker bool
+	CreatedAt      pgtype.Timestamptz
+}
+
+type UploadPart struct {
+	UploadID  pgtype.UUID
+	PartNo    int32
+	ChunkID   pgtype.UUID
+	SizeBytes int64
+	Sha256    string
+}
+
+type User struct {
+	ID           pgtype.UUID
+	Email        string
+	PasswordHash string
+	CreatedAt    pgtype.Timestamptz
+}
