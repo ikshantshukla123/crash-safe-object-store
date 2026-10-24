@@ -1,8 +1,4 @@
 // Command api is the HTTP API and the single write coordinator.
-//
-// Phase 1 is the walking skeleton: configuration, structured logging, a
-// Postgres pool, a Redis client, and /health. Object and bucket routes arrive
-// in Phase 2.
 package main
 
 import (
@@ -16,13 +12,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/auth"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/config"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/coordinator"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/db/dbgen"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/objects"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/placement"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/presign"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/wal"
 )
 
 func main() {
@@ -55,6 +57,51 @@ func run() error {
 	}
 	defer pool.Close()
 
+	q := dbgen.New(pool)
+	nodes, err := registerNodes(ctx, q, cfg.StorageNodes)
+	if err != nil {
+		return err
+	}
+
+	recovery := coordinator.NewRecovery(pool, q, log, nodes, cfg.WriteQuorumW)
+	walLog, walResult, err := wal.Recover(ctx, cfg.WALDir, cfg.WALSegmentBytes, recovery)
+	if err != nil {
+		return fmt.Errorf("recover wal: %w", err)
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := walLog.Close(closeCtx); err != nil {
+			log.Error("closing wal", "err", err)
+		}
+	}()
+	log.Info("wal recovered",
+		"records", walResult.Records,
+		"pending_puts", walResult.PendingPuts,
+		"pending_deletes", walResult.PendingDels,
+		"last_lsn", walResult.LastLSN,
+		"truncated_tail", walResult.Truncated,
+	)
+
+	coord, err := coordinator.New(pool, q, log, walLog, nodes, coordinator.Config{
+		Replicas:        cfg.ReplicasN,
+		WriteQuorum:     cfg.WriteQuorumW,
+		MaxPartSize:     cfg.MaxPartSizeBytes,
+		MultipartExpiry: cfg.MultipartExpiry,
+	})
+	if err != nil {
+		return err
+	}
+
+	issuer, err := auth.NewIssuer(cfg.JWTSecret, cfg.JWTTTL)
+	if err != nil {
+		return err
+	}
+	signer, err := presign.New(cfg.PresignKeyID, cfg.PresignSecret, cfg.PresignMaxExpiry)
+	if err != nil {
+		return err
+	}
+
 	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 	defer func() {
 		if err := rdb.Close(); err != nil {
@@ -64,7 +111,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.APIAddr,
-		Handler:           newRouter(log, dbgen.New(pool), rdb),
+		Handler:           newRouter(log, q, rdb, coord, issuer, signer),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		// No WriteTimeout: object downloads are streamed and a fixed deadline
@@ -100,6 +147,31 @@ func run() error {
 	return nil
 }
 
+func registerNodes(ctx context.Context, q *dbgen.Queries, configured []config.StorageNode) ([]placement.Node, error) {
+	out := make([]placement.Node, 0, len(configured))
+	for _, sn := range configured {
+		id := placement.NodeID(sn.Name)
+		parsed, err := uuid.Parse(id)
+		if err != nil {
+			return nil, fmt.Errorf("parse node id: %w", err)
+		}
+		if _, err := q.UpsertStorageNode(ctx, dbgen.UpsertStorageNodeParams{
+			ID:      pgtype.UUID{Bytes: parsed, Valid: true},
+			Name:    sn.Name,
+			BaseUrl: sn.URL,
+		}); err != nil {
+			return nil, fmt.Errorf("register storage node %s: %w", sn.Name, err)
+		}
+		out = append(out, placement.Node{
+			ID:     id,
+			Name:   sn.Name,
+			Status: "up",
+			Store:  objects.NewNodeClient(id, sn.Name, sn.URL),
+		})
+	}
+	return out, nil
+}
+
 func newPostgres(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
@@ -115,22 +187,4 @@ func newPostgres(ctx context.Context, url string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
 	return pool, nil
-}
-
-func newRouter(log *slog.Logger, q *dbgen.Queries, rdb *redis.Client) http.Handler {
-	r := chi.NewRouter()
-
-	// RequestID first: everything downstream, including the panic recoverer,
-	// should be able to quote the same op_id.
-	//
-	// chi's RealIP is deliberately absent: it is deprecated and spoofable,
-	// since it trusts X-Forwarded-For regardless of whether a proxy set it.
-	// When Phase 8 needs the client IP for rate limiting, parse it from a
-	// trusted-proxy allowlist instead.
-	r.Use(middleware.RequestID)
-	r.Use(requestLogger(log))
-	r.Use(middleware.Recoverer)
-
-	r.Get("/health", handleHealth(log, q, rdb))
-	return r
 }
