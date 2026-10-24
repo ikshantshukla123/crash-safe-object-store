@@ -16,10 +16,16 @@ SELECT * FROM buckets WHERE owner_id = $1 ORDER BY name;
 -- name: DeleteBucket :execrows
 DELETE FROM buckets WHERE id = $1 AND owner_id = $2;
 
+-- name: GetBucketByNameForUpdate :one
+SELECT * FROM buckets WHERE name = $1 FOR UPDATE;
+
 -- name: CountLiveObjectsInBucket :one
--- A bucket is "empty" when no object still points at a live version. Objects
--- whose current version is a delete marker do not count.
-SELECT count(*)
-FROM objects o
+SELECT count(*) FROM objects o
 JOIN object_versions v ON v.id = o.current_version_id
-WHERE o.bucket_id = $1 AND v.is_delete_marker = false;
+WHERE o.bucket_id = $1 AND NOT v.is_delete_marker;
+
+-- name: DeleteUploadsForBucket :exec
+DELETE FROM multipart_uploads WHERE bucket_id = $1;
+
+-- name: DeleteObjectRowsForBucket :exec
+DELETE FROM objects WHERE bucket_id = $1;

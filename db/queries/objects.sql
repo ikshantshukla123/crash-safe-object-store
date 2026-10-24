@@ -29,6 +29,9 @@ UPDATE objects SET current_version_id = $2, updated_at = now() WHERE id = $1;
 -- name: GetObjectByKey :one
 SELECT * FROM objects WHERE bucket_id = $1 AND key = $2;
 
+-- name: GetObjectForUpdate :one
+SELECT * FROM objects WHERE bucket_id = $1 AND key = $2 FOR UPDATE;
+
 -- name: GetCurrentVersion :one
 -- The live version of a key. A delete marker is returned rather than hidden,
 -- so the handler can tell "never existed" (no row) from "deleted" (tombstone)
