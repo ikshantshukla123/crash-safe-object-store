@@ -9,6 +9,8 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://u:p@localhost:5432/db")
+	t.Setenv("JWT_SECRET", "01234567890123456789012345678901")
+	t.Setenv("PRESIGN_SECRET", "abcdefghijklmnopqrstuvwxyz012345")
 
 	cfg, err := Load()
 	if err != nil {
@@ -30,6 +32,8 @@ func TestLoadDefaults(t *testing.T) {
 
 func TestLoadOverrides(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://u:p@localhost:5432/db")
+	t.Setenv("JWT_SECRET", "01234567890123456789012345678901")
+	t.Setenv("PRESIGN_SECRET", "abcdefghijklmnopqrstuvwxyz012345")
 	t.Setenv("API_ADDR", ":9999")
 	t.Setenv("LOG_LEVEL", "debug")
 	t.Setenv("DEMO_MODE", "true")
@@ -65,6 +69,8 @@ func TestLoadMissingDatabaseURL(t *testing.T) {
 // misconfiguration instead of revealing it one variable at a time.
 func TestLoadReportsAllErrors(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
+	t.Setenv("JWT_SECRET", "")
+	t.Setenv("PRESIGN_SECRET", "")
 	t.Setenv("LOG_LEVEL", "chatty")
 	t.Setenv("DEMO_MODE", "yes-please")
 	t.Setenv("SHUTDOWN_TIMEOUT", "soon")
@@ -73,7 +79,7 @@ func TestLoadReportsAllErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load() succeeded, want an error")
 	}
-	for _, want := range []string{"DATABASE_URL", "LOG_LEVEL", "DEMO_MODE", "SHUTDOWN_TIMEOUT"} {
+	for _, want := range []string{"DATABASE_URL", "JWT_SECRET", "PRESIGN_SECRET", "LOG_LEVEL", "DEMO_MODE", "SHUTDOWN_TIMEOUT"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not mention %s:\n%v", want, err)
 		}
