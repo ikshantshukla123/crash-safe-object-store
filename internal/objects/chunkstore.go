@@ -13,6 +13,8 @@ var (
 	// ErrChecksumMismatch means the bytes written did not hash to the
 	// checksum the caller promised. The write is discarded.
 	ErrChecksumMismatch = errors.New("chunk checksum mismatch")
+	// ErrOutOfSpace means the storage node has no room for the chunk.
+	ErrOutOfSpace = errors.New("storage node out of space")
 )
 
 // ChunkStore holds immutable chunk bytes addressed by chunk id.
