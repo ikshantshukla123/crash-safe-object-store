@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/app ./cmd/${CMD_NAME}
 
 FROM alpine:3.21
 # busybox wget ships with alpine and is what the Compose healthcheck calls.
-RUN adduser -D -u 10001 app
+RUN adduser -D -u 10001 app && mkdir -p /data/chunks /data/wal && chown -R app:app /data
 COPY --from=build /out/app /usr/local/bin/app
 USER app
 ENTRYPOINT ["/usr/local/bin/app"]

@@ -1,7 +1,7 @@
 # Crash-safe object store — developer entry points.
 # Indented recipe lines must be TABS; this file is generated with tabs.
 
-SQLC_VERSION := 1.27.0
+SQLC_VERSION := 1.30.0
 
 COMPOSE := docker compose --project-directory . -f deploy/docker-compose.yml
 COMPOSE_PROD := $(COMPOSE) -f deploy/docker-compose.prod.yml
@@ -39,7 +39,8 @@ lint: ## Static analysis
 	golangci-lint run ./...
 
 crash-test: ## WAL crash-injection harness
-	go test ./internal/wal/... -run Crash -count=1
+	go test ./internal/wal/... -count=1
+	go test ./test/crash/... -run Crash -count=1 -v
 
 e2e: ## Compose-based failure scenarios: kill node, heal, replay
 	go test ./test/e2e/... -tags=e2e -count=1

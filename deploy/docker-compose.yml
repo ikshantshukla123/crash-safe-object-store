@@ -58,6 +58,45 @@ services:
       - "-database=postgres://${POSTGRES_USER:-objstore}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-objstore}?sslmode=disable"
       - "up"
 
+  node1: &node
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CMD_NAME: node
+    environment:
+      NODE_NAME: node1
+      NODE_ADDR: ":9000"
+      NODE_DATA_DIR: /data/chunks
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - node1data:/data/chunks
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  node2:
+    <<: *node
+    environment:
+      NODE_NAME: node2
+      NODE_ADDR: ":9000"
+      NODE_DATA_DIR: /data/chunks
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - node2data:/data/chunks
+
+  node3:
+    <<: *node
+    environment:
+      NODE_NAME: node3
+      NODE_ADDR: ":9000"
+      NODE_DATA_DIR: /data/chunks
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - node3data:/data/chunks
+
   api:
     build:
       context: .
@@ -71,6 +110,20 @@ services:
       # Service names resolve on the Compose network; no host ports involved.
       DATABASE_URL: postgres://${POSTGRES_USER:-objstore}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-objstore}?sslmode=disable
       REDIS_ADDR: redis:6379
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      JWT_TTL: ${JWT_TTL:-15m}
+      PRESIGN_KEY_ID: ${PRESIGN_KEY_ID:-k1}
+      PRESIGN_SECRET: ${PRESIGN_SECRET:?set PRESIGN_SECRET in .env}
+      PRESIGN_MAX_EXPIRY: ${PRESIGN_MAX_EXPIRY:-168h}
+      STORAGE_NODES: node1=http://node1:9000,node2=http://node2:9000,node3=http://node3:9000
+      REPLICAS_N: ${REPLICAS_N:-3}
+      WRITE_QUORUM_W: ${WRITE_QUORUM_W:-2}
+      MAX_PART_SIZE_BYTES: ${MAX_PART_SIZE_BYTES:-16777216}
+      MULTIPART_EXPIRY: ${MULTIPART_EXPIRY:-24h}
+      WAL_DIR: /data/wal
+      WAL_SEGMENT_BYTES: ${WAL_SEGMENT_BYTES:-67108864}
+    volumes:
+      - waldata:/data/wal
     ports:
       - "8080:8080"
     depends_on:
@@ -80,6 +133,12 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+      node3:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 10s
@@ -90,3 +149,7 @@ services:
 volumes:
   pgdata:
   redisdata:
+  node1data:
+  node2data:
+  node3data:
+  waldata:
