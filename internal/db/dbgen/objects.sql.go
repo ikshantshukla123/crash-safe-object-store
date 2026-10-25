@@ -33,7 +33,7 @@ const createObjectVersion = `-- name: CreateObjectVersion :one
 INSERT INTO object_versions (
     object_id, version_no, size_bytes, checksum, content_type, is_delete_marker
 ) VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, object_id, version_no, size_bytes, checksum, content_type, is_delete_marker, created_at
+RETURNING id, object_id, version_no, size_bytes, checksum, content_type, is_delete_marker, created_at, metadata
 `
 
 type CreateObjectVersionParams struct {
@@ -64,12 +64,13 @@ func (q *Queries) CreateObjectVersion(ctx context.Context, arg CreateObjectVersi
 		&i.ContentType,
 		&i.IsDeleteMarker,
 		&i.CreatedAt,
+		&i.Metadata,
 	)
 	return i, err
 }
 
 const getCurrentVersion = `-- name: GetCurrentVersion :one
-SELECT v.id, v.object_id, v.version_no, v.size_bytes, v.checksum, v.content_type, v.is_delete_marker, v.created_at
+SELECT v.id, v.object_id, v.version_no, v.size_bytes, v.checksum, v.content_type, v.is_delete_marker, v.created_at, v.metadata
 FROM objects o
 JOIN object_versions v ON v.id = o.current_version_id
 WHERE o.bucket_id = $1 AND o.key = $2
@@ -95,6 +96,7 @@ func (q *Queries) GetCurrentVersion(ctx context.Context, arg GetCurrentVersionPa
 		&i.ContentType,
 		&i.IsDeleteMarker,
 		&i.CreatedAt,
+		&i.Metadata,
 	)
 	return i, err
 }

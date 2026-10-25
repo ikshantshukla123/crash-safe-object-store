@@ -54,6 +54,14 @@ type Object struct {
 	UpdatedAt        pgtype.Timestamptz
 }
 
+type ObjectEmbedding struct {
+	VersionID pgtype.UUID
+	Content   string
+	Model     string
+	Embedding string
+	CreatedAt pgtype.Timestamptz
+}
+
 type ObjectVersion struct {
 	ID             pgtype.UUID
 	ObjectID       pgtype.UUID
@@ -63,6 +71,7 @@ type ObjectVersion struct {
 	ContentType    string
 	IsDeleteMarker bool
 	CreatedAt      pgtype.Timestamptz
+	Metadata       []byte
 }
 
 type StorageNode struct {

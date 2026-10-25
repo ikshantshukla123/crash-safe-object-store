@@ -12,7 +12,7 @@ import (
 )
 
 const getObjectVersionByID = `-- name: GetObjectVersionByID :one
-SELECT id, object_id, version_no, size_bytes, checksum, content_type, is_delete_marker, created_at FROM object_versions WHERE id = $1
+SELECT id, object_id, version_no, size_bytes, checksum, content_type, is_delete_marker, created_at, metadata FROM object_versions WHERE id = $1
 `
 
 func (q *Queries) GetObjectVersionByID(ctx context.Context, id pgtype.UUID) (ObjectVersion, error) {
@@ -27,6 +27,7 @@ func (q *Queries) GetObjectVersionByID(ctx context.Context, id pgtype.UUID) (Obj
 		&i.ContentType,
 		&i.IsDeleteMarker,
 		&i.CreatedAt,
+		&i.Metadata,
 	)
 	return i, err
 }
