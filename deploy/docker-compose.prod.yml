@@ -1,0 +1,92 @@
+# Production overlay for one EC2 instance. Layers on the local file; only
+# ports, bind mounts, TLS and image coordinates differ.
+#
+# Run from the repo root:
+#   IMAGE_TAG=<git-sha> docker compose \
+#     --project-directory . \
+#     -f deploy/docker-compose.yml \
+#     -f deploy/docker-compose.prod.yml up -d
+
+name: objstore
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-app-image: &app-image
+  image: ${IMAGE_REGISTRY:-ghcr.io/ikshantshukla123/objstore}/api:${IMAGE_TAG:-local}
+  pull_policy: always
+
+services:
+  postgres:
+    <<: *logging
+    ports: !reset []
+    volumes: !override
+      - /srv/objstore/pg:/var/lib/postgresql/data
+
+  redis:
+    <<: *logging
+    ports: !reset []
+    volumes: !override
+      - /srv/objstore/redis:/data
+
+  migrate:
+    <<: *logging
+
+  node1:
+    <<: [*app-image, *logging]
+    image: ${IMAGE_REGISTRY:-ghcr.io/ikshantshukla123/objstore}/node:${IMAGE_TAG:-local}
+    ports: !reset []
+    volumes: !override
+      - /srv/objstore/node1:/data/chunks
+
+  node2:
+    <<: [*app-image, *logging]
+    image: ${IMAGE_REGISTRY:-ghcr.io/ikshantshukla123/objstore}/node:${IMAGE_TAG:-local}
+    ports: !reset []
+    volumes: !override
+      - /srv/objstore/node2:/data/chunks
+
+  node3:
+    <<: [*app-image, *logging]
+    image: ${IMAGE_REGISTRY:-ghcr.io/ikshantshukla123/objstore}/node:${IMAGE_TAG:-local}
+    ports: !reset []
+    volumes: !override
+      - /srv/objstore/node3:/data/chunks
+
+  api:
+    <<: [*app-image, *logging]
+    ports: !reset []
+    volumes: !override
+      - /srv/objstore/wal:/data/wal
+
+  worker:
+    <<: [*app-image, *logging]
+    image: ${IMAGE_REGISTRY:-ghcr.io/ikshantshukla123/objstore}/worker:${IMAGE_TAG:-local}
+
+  chaos:
+    <<: *logging
+    image: ${IMAGE_REGISTRY:-ghcr.io/ikshantshukla123/objstore}/chaos:${IMAGE_TAG:-local}
+    pull_policy: always
+    # Root-equivalent. Allowed only because this instance is single-purpose.
+    environment:
+      DEMO_MODE: "true"
+
+  edge:
+    <<: *logging
+    image: ${IMAGE_REGISTRY:-ghcr.io/ikshantshukla123/objstore}/edge:${IMAGE_TAG:-local}
+    pull_policy: always
+    ports: !override
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

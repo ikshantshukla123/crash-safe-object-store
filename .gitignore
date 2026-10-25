@@ -6,6 +6,9 @@
 CLAUDE.md
 # Go build output
 /bin/
+/api
+/chaos
+/worker
 *.test
 *.out
 
@@ -16,6 +19,7 @@ CLAUDE.md
 # Frontend
 dashboard/node_modules/
 dashboard/dist/
+dashboard/*.tsbuildinfo
 
 # Editor / OS
 .DS_Store

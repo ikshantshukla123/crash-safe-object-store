@@ -86,3 +86,47 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
+
+  dashboard:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Install and build dashboard
+        working-directory: dashboard
+        run: |
+          npm ci
+          npm run build
+
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Write CI environment
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_PASSWORD=ci-postgres-password
+          JWT_SECRET=ci-jwt-secret-not-for-production
+          PRESIGN_SECRET=ci-presign-secret-not-for-production
+          PRESIGN_KEY_ID=k1
+          DEMO_MODE=true
+          DEMO_TOKEN=ci-demo-token
+          POSTGRES_HOST_PORT=5433
+          REDIS_HOST_PORT=6379
+          EDGE_PORT=8000
+          EOF
+      - name: Build and start the Compose stack
+        run: make up
+      - name: Compose failure smoke test
+        run: ./deploy/smoke.sh
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose --project-directory . -f deploy/docker-compose.yml logs --tail=200
+      - name: Stop the stack
+        if: always()
+        run: make down

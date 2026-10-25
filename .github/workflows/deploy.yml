@@ -1,0 +1,100 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}/objstore
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - service: api
+            dockerfile: Dockerfile
+            cmd: api
+          - service: node
+            dockerfile: Dockerfile
+            cmd: node
+          - service: worker
+            dockerfile: Dockerfile
+            cmd: worker
+          - service: chaos
+            dockerfile: Dockerfile.chaos
+            cmd: ""
+          - service: edge
+            dockerfile: Dockerfile.dashboard
+            cmd: ""
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          build-args: CMD_NAME=${{ matrix.cmd }}
+          tags: ${{ env.REGISTRY }}/${{ matrix.service }}:${{ github.event.workflow_run.head_sha || github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: production
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      SITE_ADDRESS: ${{ vars.SITE_ADDRESS }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/srv/objstore/app' }}
+    steps:
+      - name: Install SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+      - name: Deploy over SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          GHCR_USER: ${{ secrets.GHCR_USER }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "$DEPLOY_USER@$DEPLOY_HOST" bash -s <<REMOTE
+          set -euo pipefail
+          cd "$DEPLOY_PATH"
+          git fetch origin "$SHA"
+          git checkout --force "$SHA"
+          if [ -n "$GHCR_TOKEN" ]; then
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          fi
+          export IMAGE_TAG="$SHA"
+          COMPOSE="docker compose --project-directory . -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml"
+          \$COMPOSE run --rm migrate
+          \$COMPOSE pull
+          \$COMPOSE up -d --remove-orphans
+          BASE_URL="https://$SITE_ADDRESS" ./deploy/smoke.sh
+          REMOTE

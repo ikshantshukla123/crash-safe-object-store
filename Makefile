@@ -42,8 +42,8 @@ crash-test: ## WAL crash-injection harness
 	go test ./internal/wal/... -count=1
 	go test ./test/crash/... -run Crash -count=1 -v
 
-e2e: ## Compose-based failure scenarios: kill node, heal, replay
-	go test ./test/e2e/... -tags=e2e -count=1
+e2e: up ## Compose-based failure scenarios: kill node, heal, verify replicas
+	./deploy/smoke.sh
 
 compose-config: ## Assert the prod compose overlay still merges cleanly
 	$(COMPOSE_PROD) config > /dev/null && echo "compose config OK"

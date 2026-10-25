@@ -11,6 +11,8 @@ services:
     # pgvector image rather than plain postgres: it bundles the vector
     # extension needed in Phase 10, and ships pg_trgm like any Postgres.
     image: pgvector/pgvector:pg16
+    container_name: objstore-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-objstore}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -34,6 +36,8 @@ services:
 
   redis:
     image: redis:7.4-alpine
+    container_name: objstore-redis
+    restart: unless-stopped
     ports:
       - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
@@ -59,6 +63,8 @@ services:
       - "up"
 
   node1: &node
+    container_name: objstore-node1
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
@@ -79,6 +85,7 @@ services:
 
   node2:
     <<: *node
+    container_name: objstore-node2
     environment:
       NODE_NAME: node2
       NODE_ADDR: ":9000"
@@ -89,6 +96,7 @@ services:
 
   node3:
     <<: *node
+    container_name: objstore-node3
     environment:
       NODE_NAME: node3
       NODE_ADDR: ":9000"
@@ -98,6 +106,8 @@ services:
       - node3data:/data/chunks
 
   api:
+    container_name: objstore-api
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
@@ -107,6 +117,7 @@ services:
       API_ADDR: ":8080"
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DEMO_MODE: ${DEMO_MODE:-false}
+      DEMO_TOKEN: ${DEMO_TOKEN:-}
       # Service names resolve on the Compose network; no host ports involved.
       DATABASE_URL: postgres://${POSTGRES_USER:-objstore}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-objstore}?sslmode=disable
       REDIS_ADDR: redis:6379
@@ -122,6 +133,14 @@ services:
       MULTIPART_EXPIRY: ${MULTIPART_EXPIRY:-24h}
       WAL_DIR: /data/wal
       WAL_SEGMENT_BYTES: ${WAL_SEGMENT_BYTES:-67108864}
+      META_CACHE_TTL: ${META_CACHE_TTL:-60s}
+      SMALL_OBJECT_CACHE_LIMIT_BYTES: ${SMALL_OBJECT_CACHE_LIMIT_BYTES:-1048576}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GC_INTERVAL: ${GC_INTERVAL:-1h}
+      GC_BATCH: ${GC_BATCH:-100}
+      GC_ORPHAN_GRACE: ${GC_ORPHAN_GRACE:-24h}
     volumes:
       - waldata:/data/wal
     ports:
@@ -145,6 +164,101 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
+
+  worker:
+    container_name: objstore-worker
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CMD_NAME: worker
+    environment:
+      WORKER_ADDR: ":8092"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-objstore}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-objstore}?sslmode=disable
+      REDIS_ADDR: redis:6379
+      STORAGE_NODES: node1=http://node1:9000,node2=http://node2:9000,node3=http://node3:9000
+      HEALTH_INTERVAL: ${HEALTH_INTERVAL:-2s}
+      HEALTH_DOWN_THRESHOLD: ${HEALTH_DOWN_THRESHOLD:-3}
+      HEALTH_UP_THRESHOLD: ${HEALTH_UP_THRESHOLD:-2}
+      REPLICATOR_BATCH: ${REPLICATOR_BATCH:-50}
+      REPLICATOR_CONCURRENCY: ${REPLICATOR_CONCURRENCY:-4}
+      REPAIR_BATCH: ${REPAIR_BATCH:-20}
+      REPAIR_INTERVAL: ${REPAIR_INTERVAL:-15s}
+      SCRUB_BATCH: ${SCRUB_BATCH:-50}
+      SCRUB_INTERVAL: ${SCRUB_INTERVAL:-30s}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+      node3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8092/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  chaos:
+    container_name: objstore-chaos
+    restart: unless-stopped
+    # The Docker socket is root-equivalent; this container is demo-only.
+    user: "0:0"
+    build:
+      context: .
+      dockerfile: Dockerfile.chaos
+    environment:
+      CHAOS_ADDR: ":8090"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      DEMO_TOKEN: ${DEMO_TOKEN:-}
+      DOCKER_HOST: unix:///var/run/docker.sock
+      API_BASE_URL: http://api:8080
+      API_CONTAINER: objstore-api
+      NODE_CONTAINER_PREFIX: objstore-node
+      K6_BASE_URL: http://api:8080
+      K6_SCRIPT: /etc/chaos/loadtest.js
+    volumes:
+      # Root-equivalent. Demo only, internal network only, token required.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./deploy/k6:/etc/chaos:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/health?token=${DEMO_TOKEN:-}"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  edge:
+    container_name: objstore-edge
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    ports:
+      - "${EDGE_PORT:-8000}:8000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 volumes:
   pgdata:

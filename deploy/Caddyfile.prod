@@ -1,0 +1,40 @@
+{
+	admin off
+	email {$ACME_EMAIL}
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
+
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy api:8080
+	}
+
+	handle /worker/* {
+		uri strip_prefix /worker
+		reverse_proxy worker:8092
+	}
+
+	handle /ws/* {
+		reverse_proxy api:8080
+	}
+
+	handle /chaos/* {
+		reverse_proxy chaos:8090 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
