@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -105,18 +106,23 @@ func (w *Worker) ProcessVersion(ctx context.Context, versionID string) error {
 	if info.IsDeleteMarker {
 		return nil
 	}
-	content, err := w.readContent(ctx, parsed)
-	if err != nil {
-		return err
+	text := info.BucketName + "/" + info.Key
+	content := ""
+	if indexableContentType(info.ContentType) {
+		raw, err := w.readContent(ctx, parsed)
+		if err != nil {
+			return err
+		}
+		content = truncate(raw, maxEmbeddedBytes)
+		text += "\n" + content
 	}
-	text := info.BucketName + "/" + info.Key + "\n" + content
 	vec, model, err := w.embedder.Embed(ctx, text)
 	if err != nil {
 		return fmt.Errorf("embed: %w", err)
 	}
 	if err := w.q.UpsertEmbedding(ctx, dbgen.UpsertEmbeddingParams{
 		VersionID: parsed,
-		Content:   truncate(content, maxEmbeddedBytes),
+		Content:   content,
 		Model:     model,
 		Embedding: VectorString(vec),
 	}); err != nil {
@@ -187,11 +193,31 @@ func (w *Worker) node(id string) (placement.Node, bool) {
 	return placement.Node{}, false
 }
 
+func indexableContentType(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	return strings.HasPrefix(ct, "text/") ||
+		ct == "application/json" ||
+		ct == "application/xml" ||
+		ct == "application/yaml" ||
+		ct == "application/x-yaml" ||
+		strings.HasSuffix(ct, "+json") ||
+		strings.HasSuffix(ct, "+xml")
+}
+
 func truncate(s string, max int) string {
+	s = sanitizeText(s)
 	if len(s) <= max {
 		return s
 	}
-	return s[:max]
+	return sanitizeText(s[:max])
+}
+
+// sanitizeText makes arbitrary object bytes safe for a Postgres text column
+// and for embedding. Binary files such as PDFs are still searchable by their
+// bucket and key; their raw bytes just cannot be stored as text.
+func sanitizeText(s string) string {
+	s = strings.ReplaceAll(s, "\x00", " ")
+	return strings.ToValidUTF8(s, " ")
 }
 
 func parseUUID(s string) (pgtype.UUID, error) {

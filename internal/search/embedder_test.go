@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestLocalEmbedderSimilarityAndShape(t *testing.T) {
@@ -36,6 +37,30 @@ func TestVectorString(t *testing.T) {
 	}
 	if strings.Count(raw, ",") != 2 {
 		t.Fatalf("vector = %q", raw)
+	}
+}
+
+func TestIndexableContentType(t *testing.T) {
+	for _, ct := range []string{"text/plain", "text/csv; charset=utf-8", "application/json", "application/ld+json"} {
+		if !indexableContentType(ct) {
+			t.Errorf("%q should be indexable", ct)
+		}
+	}
+	for _, ct := range []string{"application/pdf", "image/png", "application/octet-stream", ""} {
+		if indexableContentType(ct) {
+			t.Errorf("%q should not be indexable", ct)
+		}
+	}
+}
+
+func TestTruncateSanitizesBinaryAndRuneBoundaries(t *testing.T) {
+	raw := string([]byte{'a', 0xff, 0xfe, 0x00, 'b'})
+	if got := truncate(raw, 32<<10); !utf8.ValidString(got) || strings.ContainsRune(got, 0) {
+		t.Fatalf("sanitized text = %q", got)
+	}
+	// Cutting "éé" after three bytes would split the second rune.
+	if got := truncate("éé", 3); !utf8.ValidString(got) {
+		t.Fatalf("rune-boundary text = %q", got)
 	}
 }
 

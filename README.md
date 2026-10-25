@@ -191,6 +191,9 @@ image tag.
   collects staged/abandoned chunks and orphan files, not old readable versions.
 - The AI search embedder falls back to a lexical hash embedding when no OpenAI
   key is set. It is deterministic and useful for the demo, not a semantic model.
+- Embeddings index text-like content (`text/*`, JSON, XML). Binary files such as
+  PDFs are searchable by bucket and filename, not by their internal text; there
+  is no PDF extraction pipeline.
 
 ## Repository layout
 
