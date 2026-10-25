@@ -13,16 +13,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/auth"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/coordinator"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/db/dbgen"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/metrics"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/nodeserver"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/objects"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/placement"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/presign"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/search"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/testutil"
 )
 
@@ -76,8 +79,12 @@ func newAPIHarness(t *testing.T) *apiHarness {
 	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
 	t.Cleanup(func() { rdb.Close() })
 
+	embedder, err := search.NewEmbedder("local-hash-1536", "", 1536)
+	if err != nil {
+		t.Fatalf("embedder: %v", err)
+	}
 	h := &apiHarness{coord: coord}
-	h.server = httptest.NewServer(newRouter(log, q, rdb, coord, issuer, signer))
+	h.server = httptest.NewServer(newRouter(log, q, rdb, coord, issuer, signer, metrics.New(), search.NewSearcher(q, embedder), "test-demo-token"))
 	t.Cleanup(h.server.Close)
 	return h
 }
@@ -325,4 +332,51 @@ func readBody(resp *http.Response) string {
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
 	return string(b)
+}
+
+func TestAPIVersionsAndRollback(t *testing.T) {
+	h := newAPIHarness(t)
+	token, _ := register(t, h, "versions@example.com")
+	if resp := h.doJSON(t, http.MethodPost, "/buckets", token, createBucketRequest{Name: "history"}, nil); resp.StatusCode != http.StatusCreated { //nolint:bodyclose // doJSON closes it
+		t.Fatalf("create bucket status = %d", resp.StatusCode)
+	}
+	put := func(body, idem string) objectResponse {
+		t.Helper()
+		resp := h.do(t, http.MethodPut, "/buckets/history/objects/doc.txt", token, []byte(body), map[string]string{ //nolint:bodyclose // helper closes the body
+			"Content-Type": "text/plain", "Idempotency-Key": idem,
+		})
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("put %s status = %d: %s", idem, resp.StatusCode, readBody(resp))
+		}
+		var out objectResponse
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("decode put: %v", err)
+		}
+		return out
+	}
+	first := put("version one", "v1")
+	second := put("version two", "v2")
+
+	var list struct {
+		Versions []versionResponse `json:"versions"`
+	}
+	if resp := h.doJSON(t, http.MethodGet, "/buckets/history/versions?key=doc.txt", token, nil, &list); resp.StatusCode != http.StatusOK { //nolint:bodyclose // doJSON closes it
+		t.Fatalf("versions status = %d", resp.StatusCode)
+	}
+	if len(list.Versions) != 2 || list.Versions[0].VersionID != second.VersionID || list.Versions[1].VersionID != first.VersionID {
+		t.Fatalf("versions = %+v", list.Versions)
+	}
+	for i := 0; i < 2; i++ {
+		if resp := h.doJSON(t, http.MethodPost, "/buckets/history/rollback", token, rollbackRequest{Key: "doc.txt", VersionID: first.VersionID}, nil); resp.StatusCode != http.StatusOK { //nolint:bodyclose // doJSON closes it
+			t.Fatalf("rollback %d status = %d", i, resp.StatusCode)
+		}
+		resp := h.do(t, http.MethodGet, "/buckets/history/objects/doc.txt", token, nil, nil) //nolint:bodyclose // helper closes the body
+		if resp.StatusCode != http.StatusOK || readBody(resp) != "version one" {
+			t.Fatalf("after rollback %d status=%d body mismatch", i, resp.StatusCode)
+		}
+	}
+	if resp := h.doJSON(t, http.MethodPost, "/buckets/history/rollback", token, rollbackRequest{Key: "doc.txt", VersionID: uuid.NewString()}, nil); resp.StatusCode != http.StatusNotFound { //nolint:bodyclose // doJSON closes it
+		t.Fatalf("unknown version rollback status = %d, want 404", resp.StatusCode)
+	}
 }

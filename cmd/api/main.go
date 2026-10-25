@@ -18,12 +18,17 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/auth"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/cache"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/config"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/coordinator"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/db/dbgen"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/gc"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/metrics"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/objects"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/placement"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/presign"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/queue"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/search"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/wal"
 )
 
@@ -83,11 +88,24 @@ func run() error {
 		"truncated_tail", walResult.Truncated,
 	)
 
+	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+	defer func() {
+		if err := rdb.Close(); err != nil {
+			log.Warn("closing redis", "err", err)
+		}
+	}()
+
+	reg := metrics.New()
 	coord, err := coordinator.New(pool, q, log, walLog, nodes, coordinator.Config{
-		Replicas:        cfg.ReplicasN,
-		WriteQuorum:     cfg.WriteQuorumW,
-		MaxPartSize:     cfg.MaxPartSizeBytes,
-		MultipartExpiry: cfg.MultipartExpiry,
+		Replicas:         cfg.ReplicasN,
+		WriteQuorum:      cfg.WriteQuorumW,
+		MaxPartSize:      cfg.MaxPartSizeBytes,
+		MultipartExpiry:  cfg.MultipartExpiry,
+		Cache:            cache.NewRedis(rdb),
+		CacheTTL:         cfg.MetaCacheTTL,
+		SmallObjectLimit: cfg.SmallObjectLimit,
+		Metrics:          reg,
+		Embeddings:       queue.NewEmbeddings(rdb),
 	})
 	if err != nil {
 		return err
@@ -101,17 +119,17 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	embedder, err := search.NewEmbedder(cfg.EmbeddingModel, cfg.OpenAIAPIKey, cfg.EmbeddingDim)
+	if err != nil {
+		return err
+	}
+	searcher := search.NewSearcher(q, embedder)
 
-	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
-	defer func() {
-		if err := rdb.Close(); err != nil {
-			log.Warn("closing redis", "err", err)
-		}
-	}()
+	go gc.New(q, nodes, log, walLog, cfg.GCOrphanGrace, cfg.GCOrphanGrace, int32(cfg.GCBatch)).Run(ctx, cfg.GCInterval)
 
 	srv := &http.Server{
 		Addr:              cfg.APIAddr,
-		Handler:           newRouter(log, q, rdb, coord, issuer, signer),
+		Handler:           newRouter(log, q, rdb, coord, issuer, signer, reg, searcher, cfg.DemoToken),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		// No WriteTimeout: object downloads are streamed and a fixed deadline

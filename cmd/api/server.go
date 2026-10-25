@@ -15,19 +15,28 @@ import (
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/auth"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/coordinator"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/db/dbgen"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/metrics"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/presign"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/search"
 )
 
 type api struct {
-	log    *slog.Logger
-	q      *dbgen.Queries
-	coord  *coordinator.Coordinator
-	issuer *auth.Issuer
-	signer *presign.Signer
+	log       *slog.Logger
+	q         *dbgen.Queries
+	coord     *coordinator.Coordinator
+	issuer    *auth.Issuer
+	signer    *presign.Signer
+	rdb       *redis.Client
+	metrics   *metrics.Registry
+	searcher  *search.Searcher
+	demoToken string
 }
 
-func newRouter(log *slog.Logger, q *dbgen.Queries, rdb *redis.Client, coord *coordinator.Coordinator, issuer *auth.Issuer, signer *presign.Signer) http.Handler {
-	a := &api{log: log, q: q, coord: coord, issuer: issuer, signer: signer}
+func newRouter(log *slog.Logger, q *dbgen.Queries, rdb *redis.Client, coord *coordinator.Coordinator, issuer *auth.Issuer, signer *presign.Signer, reg *metrics.Registry, searcher *search.Searcher, demoToken string) http.Handler {
+	a := &api{
+		log: log, q: q, coord: coord, issuer: issuer, signer: signer,
+		rdb: rdb, metrics: reg, searcher: searcher, demoToken: demoToken,
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -35,6 +44,9 @@ func newRouter(log *slog.Logger, q *dbgen.Queries, rdb *redis.Client, coord *coo
 	r.Use(middleware.Recoverer)
 
 	r.Get("/health", handleHealth(log, q, rdb))
+	r.Method(http.MethodGet, "/metrics", reg.Handler())
+	r.Method(http.MethodGet, "/stats", reg.SnapshotHandler())
+	r.Get("/ws/metrics", a.handleMetricsWS)
 	r.Post("/auth/register", a.handleRegister)
 	r.Post("/auth/login", a.handleLogin)
 
@@ -44,6 +56,9 @@ func newRouter(log *slog.Logger, q *dbgen.Queries, rdb *redis.Client, coord *coo
 		r.Post("/buckets", a.handleCreateBucket)
 		r.Delete("/buckets/{bucket}", a.handleDeleteBucket)
 		r.Get("/buckets/{bucket}/objects", a.handleListObjects)
+		r.Get("/buckets/{bucket}/versions", a.handleListVersions)
+		r.Post("/buckets/{bucket}/rollback", a.handleRollback)
+		r.Get("/search", a.handleSearch)
 		r.Put("/buckets/{bucket}/objects/*", a.handlePutObject)
 		r.Delete("/buckets/{bucket}/objects/*", a.handleDeleteObject)
 		r.Post("/buckets/{bucket}/uploads", a.handleInitUpload)
@@ -52,6 +67,12 @@ func newRouter(log *slog.Logger, q *dbgen.Queries, rdb *redis.Client, coord *coo
 		r.Delete("/buckets/{bucket}/uploads/{uploadID}", a.handleAbortUpload)
 		r.Get("/buckets/{bucket}/uploads/{uploadID}/parts", a.handleListParts)
 		r.Post("/buckets/{bucket}/presign", a.handlePresign)
+	})
+
+	r.Route("/admin", func(r chi.Router) {
+		r.Use(a.requireDemoToken)
+		r.Post("/reset", a.handleDemoReset)
+		r.Post("/seed", a.handleDemoSeed)
 	})
 
 	r.Get("/buckets/{bucket}/objects/*", a.handleGetObject)
