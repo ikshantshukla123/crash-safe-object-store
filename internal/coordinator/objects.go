@@ -470,6 +470,15 @@ func (c *Coordinator) CompleteUpload(ctx context.Context, ownerID, bucketName, u
 	if err := tx.Commit(ctx); err != nil {
 		return dbgen.ObjectVersion{}, fmt.Errorf("commit complete transaction: %w", err)
 	}
+	c.invalidateMeta(ctx, bucket.Name, upload.Key)
+	if c.cfg.Metrics != nil {
+		c.cfg.Metrics.ObjectWrites.Add(1)
+	}
+	if c.cfg.Embeddings != nil {
+		if err := c.cfg.Embeddings.Enqueue(ctx, uuidString(version.ID)); err != nil {
+			c.log.WarnContext(ctx, "enqueue embedding", "version_id", uuidString(version.ID), "err", err)
+		}
+	}
 	return version, nil
 }
 
@@ -631,6 +640,7 @@ func (c *Coordinator) DeleteObject(ctx context.Context, ownerID, bucketName, key
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit delete transaction: %w", err)
 	}
+	c.invalidateMeta(ctx, bucket.Name, key)
 	return nil
 }
 

@@ -8,8 +8,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/cache"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/db/dbgen"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/metrics"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/placement"
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/queue"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/wal"
 )
 
@@ -20,6 +23,12 @@ type Config struct {
 	MaxPartSize     int64
 	MultipartExpiry time.Duration
 	Now             func() time.Time
+
+	Cache            cache.Store
+	CacheTTL         time.Duration
+	SmallObjectLimit int64
+	Metrics          *metrics.Registry
+	Embeddings       *queue.Embeddings
 }
 
 // Coordinator owns every mutating object path.
@@ -59,6 +68,12 @@ func New(pool *pgxpool.Pool, q *dbgen.Queries, log *slog.Logger, logWAL *wal.Log
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.CacheTTL <= 0 {
+		cfg.CacheTTL = 60 * time.Second
+	}
+	if cfg.SmallObjectLimit < 0 {
+		cfg.SmallObjectLimit = 0
 	}
 	return &Coordinator{
 		pool:  pool,

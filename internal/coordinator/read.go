@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/ikshantshukla123/crash-safe-object-store/internal/cache"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/db/dbgen"
 	"github.com/ikshantshukla123/crash-safe-object-store/internal/placement"
 )
@@ -26,15 +28,15 @@ type ObjectReader struct {
 	Start       int64
 	End         int64
 	Partial     bool
-	pipe        *io.PipeReader
+	body        io.ReadCloser
 }
 
 func (o *ObjectReader) Read(p []byte) (int, error) {
-	return o.pipe.Read(p)
+	return o.body.Read(p)
 }
 
 func (o *ObjectReader) Close() error {
-	return o.pipe.Close()
+	return o.body.Close()
 }
 
 func (c *Coordinator) GetObject(ctx context.Context, ownerID, bucketName, key string) (*ObjectReader, error) {
@@ -48,7 +50,7 @@ func (c *Coordinator) GetObjectRange(ctx context.Context, ownerID, bucketName, k
 	if err != nil {
 		return nil, err
 	}
-	return c.openObjectByBucket(ctx, bucket.ID, key, rangeHeader)
+	return c.openObjectByBucket(ctx, bucket.ID, bucket.Name, key, rangeHeader)
 }
 
 // GetObjectPublic opens an object without an owner check. Callers must already
@@ -66,16 +68,17 @@ func (c *Coordinator) GetObjectPublicRange(ctx context.Context, bucketName, key,
 	if err != nil {
 		return nil, fmt.Errorf("get bucket %s: %w", bucketName, err)
 	}
-	return c.openObjectByBucket(ctx, bucket.ID, key, rangeHeader)
+	return c.openObjectByBucket(ctx, bucket.ID, bucket.Name, key, rangeHeader)
 }
 
-func (c *Coordinator) openObjectByBucket(ctx context.Context, bucketID pgtype.UUID, key, rangeHeader string) (*ObjectReader, error) {
-	version, err := c.q.GetCurrentVersion(ctx, dbgen.GetCurrentVersionParams{BucketID: bucketID, Key: key})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
+func (c *Coordinator) openObjectByBucket(ctx context.Context, bucketID pgtype.UUID, bucketName, key, rangeHeader string) (*ObjectReader, error) {
+	if c.cfg.Metrics != nil {
+		c.cfg.Metrics.ObjectReads.Add(1)
 	}
+
+	version, metaHit, cacheable, err := c.versionForRead(ctx, bucketID, bucketName, key, rangeHeader == "")
 	if err != nil {
-		return nil, fmt.Errorf("get current version %s: %w", key, err)
+		return nil, err
 	}
 	if version.IsDeleteMarker {
 		return nil, ErrNotFound
@@ -103,7 +106,6 @@ func (c *Coordinator) openObjectByBucket(ctx context.Context, bucketID pgtype.UU
 		return nil, err
 	}
 
-	pr, pw := io.Pipe()
 	reader := &ObjectReader{
 		Version:     version,
 		ContentType: version.ContentType,
@@ -112,10 +114,108 @@ func (c *Coordinator) openObjectByBucket(ctx context.Context, bucketID pgtype.UU
 		Start:       start,
 		End:         end,
 		Partial:     partial,
-		pipe:        pr,
 	}
+
+	// Full objects under the cache limit are fetched and verified before the
+	// response starts. That lets us cache immutable version bytes and still
+	// guarantee a cache hit never serves bytes that skipped verification.
+	if cacheable && !partial && c.cfg.Cache != nil && c.cfg.SmallObjectLimit > 0 && version.SizeBytes <= c.cfg.SmallObjectLimit {
+		if cached, ok := c.cachedObject(ctx, version.ID); ok {
+			c.recordCache(true)
+			reader.body = io.NopCloser(bytes.NewReader(cached))
+			return reader, nil
+		}
+		c.recordCache(false)
+		data, err := c.readAllChunks(ctx, chunks)
+		if err != nil {
+			return nil, err
+		}
+		reader.body = io.NopCloser(bytes.NewReader(data))
+		c.cacheObject(ctx, version.ID, bucketName, key, data)
+		return reader, nil
+	}
+	if c.cfg.Cache != nil && cacheable {
+		c.recordCache(metaHit)
+	}
+
+	pr, pw := io.Pipe()
+	reader.body = pr
 	go c.streamChunks(ctx, chunks, start, end, pw)
 	return reader, nil
+}
+
+func (c *Coordinator) versionForRead(ctx context.Context, bucketID pgtype.UUID, bucketName, key string, allowCache bool) (dbgen.ObjectVersion, bool, bool, error) {
+	if allowCache && c.cfg.Cache != nil {
+		if raw, err := c.cfg.Cache.Get(ctx, cache.MetaKey(bucketName, key)); err == nil {
+			if id, parseErr := parseUUID(string(raw)); parseErr == nil {
+				if version, err := c.q.GetObjectVersionByID(ctx, id); err == nil {
+					return version, true, true, nil
+				}
+			}
+			_ = c.cfg.Cache.Delete(ctx, cache.MetaKey(bucketName, key))
+		}
+	}
+
+	version, err := c.q.GetCurrentVersion(ctx, dbgen.GetCurrentVersionParams{BucketID: bucketID, Key: key})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return dbgen.ObjectVersion{}, false, false, ErrNotFound
+	}
+	if err != nil {
+		return dbgen.ObjectVersion{}, false, false, fmt.Errorf("get current version %s: %w", key, err)
+	}
+	return version, false, true, nil
+}
+
+func (c *Coordinator) cachedObject(ctx context.Context, versionID pgtype.UUID) ([]byte, bool) {
+	raw, err := c.cfg.Cache.Get(ctx, cache.ObjectKey(uuidString(versionID)))
+	if err != nil {
+		return nil, false
+	}
+	return raw, true
+}
+
+func (c *Coordinator) cacheObject(ctx context.Context, versionID pgtype.UUID, bucketName, key string, data []byte) {
+	if c.cfg.Cache == nil {
+		return
+	}
+	if err := c.cfg.Cache.Set(ctx, cache.ObjectKey(uuidString(versionID)), data, 0); err != nil {
+		c.log.WarnContext(ctx, "caching object", "version_id", uuidString(versionID), "err", err)
+	}
+	if err := c.cfg.Cache.Set(ctx, cache.MetaKey(bucketName, key), []byte(uuidString(versionID)), c.cfg.CacheTTL); err != nil {
+		c.log.WarnContext(ctx, "caching metadata pointer", "bucket", bucketName, "key", key, "err", err)
+	}
+}
+
+func (c *Coordinator) recordCache(hit bool) {
+	if c.cfg.Metrics == nil {
+		return
+	}
+	if hit {
+		c.cfg.Metrics.CacheHits.Add(1)
+		return
+	}
+	c.cfg.Metrics.CacheMisses.Add(1)
+}
+
+func (c *Coordinator) invalidateMeta(ctx context.Context, bucketName, key string) {
+	if c.cfg.Cache == nil {
+		return
+	}
+	if err := c.cfg.Cache.Delete(ctx, cache.MetaKey(bucketName, key)); err != nil {
+		c.log.WarnContext(ctx, "invalidating metadata cache", "bucket", bucketName, "key", key, "err", err)
+	}
+}
+
+func (c *Coordinator) readAllChunks(ctx context.Context, chunks []dbgen.Chunk) ([]byte, error) {
+	var out bytes.Buffer
+	for _, chunk := range chunks {
+		data, err := c.fetchChunk(ctx, chunk)
+		if err != nil {
+			return nil, err
+		}
+		out.Write(data)
+	}
+	return out.Bytes(), nil
 }
 
 func (c *Coordinator) streamChunks(ctx context.Context, chunks []dbgen.Chunk, start, end int64, pw *io.PipeWriter) {
