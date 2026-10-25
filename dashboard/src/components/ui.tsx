@@ -1,7 +1,7 @@
 import { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, useEffect } from 'react';
 import {
   AlertTriangle, CheckCircle2, Compass, Loader2, Sparkles, Star, ThumbsUp, X, XCircle,
-  CalendarCheck, CircleSlash, FileSearch, Send, ShieldCheck,
+  CalendarCheck, CircleSlash, FileSearch, ShieldCheck,
 } from 'lucide-react';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'quiet';
@@ -50,14 +50,15 @@ export function IconButton({
 }
 
 export type StatusTone =
-  | 'new' | 'verified' | 'shortlisting' | 'match' | 'meeting'
+  | 'new' | 'verified' | 'shortlisting' | 'healthy' | 'current' | 'meeting'
   | 'hold' | 'matched' | 'closed' | 'danger';
 
 const statusMeta: Record<StatusTone, { label: string; icon: ReactNode }> = {
   new: { label: 'New', icon: <Sparkles size={12} /> },
   verified: { label: 'Verified', icon: <ShieldCheck size={12} /> },
   shortlisting: { label: 'Shortlisting', icon: <FileSearch size={12} /> },
-  match: { label: 'Match Sent', icon: <Send size={12} /> },
+  healthy: { label: 'Healthy', icon: <CheckCircle2 size={12} /> },
+  current: { label: 'Current', icon: <ShieldCheck size={12} /> },
   meeting: { label: 'Meeting Scheduled', icon: <CalendarCheck size={12} /> },
   hold: { label: 'On Hold', icon: <CircleSlash size={12} /> },
   matched: { label: 'Matched', icon: <CheckCircle2 size={12} /> },

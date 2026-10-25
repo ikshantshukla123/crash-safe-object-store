@@ -127,7 +127,7 @@ body {
 .status-new { background: #eef0f4; color: #0f1b2d; }
 .status-verified { background: var(--verified-soft); color: #1f4a6b; }
 .status-shortlisting { background: #eeebf6; color: #4a3d7a; }
-.status-match { background: var(--primary-soft); color: #154236; }
+.status-healthy, .status-current { background: var(--primary-soft); color: #154236; }
 .status-meeting { background: #fbeee6; color: #8a4b1f; }
 .status-hold { background: #f1eee8; color: #5f6470; }
 .status-matched { background: var(--accent-soft); color: var(--accent-text); }
@@ -137,7 +137,7 @@ body {
 .dark .status-new { background: #242a33; color: #d9dee7; }
 .dark .status-verified { background: var(--verified-soft); color: var(--verified); }
 .dark .status-shortlisting { background: #2a2438; color: #c9bfe8; }
-.dark .status-match { background: var(--primary-soft); color: #9bd8c2; }
+.dark .status-healthy, .dark .status-current { background: var(--primary-soft); color: #9bd8c2; }
 .dark .status-meeting { background: #3a2a20; color: #e6b893; }
 .dark .status-hold { background: #2b3038; color: var(--text-muted); }
 .dark .status-matched { background: var(--accent-soft); color: var(--accent-text); }

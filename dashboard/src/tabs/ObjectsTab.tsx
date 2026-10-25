@@ -459,7 +459,7 @@ function VersionsModal({ row, bucket, onClose, onRollback }: {
             <div key={version.version_id} className={`rounded-xl border p-3 ${index === 0 ? 'border-primary/40 bg-primary-soft/50' : 'border-edge bg-muted'}`}>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="tnum text-[13px] font-semibold text-body">v{version.version_no}</span>
-                {index === 0 ? <StatusTag tone="match" /> : <StatusTag tone="closed" />}
+                {index === 0 ? <StatusTag tone="current" /> : <StatusTag tone="closed" />}
                 {version.is_delete_marker ? <StatusTag tone="hold" /> : <StatusTag tone="verified" />}
                 <span className="ml-auto text-[12px] text-subtle">{formatTime(version.created_at)}</span>
               </div>

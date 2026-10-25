@@ -133,7 +133,7 @@ export default function FailuresTab({ onNeedDemo }: { onNeedDemo: () => void }) 
                         <div className="text-[11px] text-faint">storage node {index + 1}</div>
                       </div>
                     </div>
-                    {running ? <StatusTag tone="match" /> : <StatusTag tone="danger" />}
+                    {running ? <StatusTag tone="healthy" /> : <StatusTag tone="danger" />}
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-2">
                     <span className="text-[11px] text-faint">{running ? 'healthy · serving verified reads' : 'down · replicas pending repair'}</span>
