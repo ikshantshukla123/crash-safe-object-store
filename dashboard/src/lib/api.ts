@@ -57,7 +57,8 @@ export async function demoApi<T>(path: string, demoToken = getDemoToken()): Prom
 }
 
 export async function chaos<T>(path: string, method = 'POST', demoToken = getDemoToken()): Promise<T> {
-  const res = await fetch(`/chaos${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(demoToken)}`, {
+  const url = path.startsWith('/chaos') ? path : `/chaos${path}`;
+  const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(demoToken)}`, {
     method,
     headers: { 'X-Demo-Token': demoToken },
   });
