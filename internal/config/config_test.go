@@ -37,6 +37,7 @@ func TestLoadOverrides(t *testing.T) {
 	t.Setenv("API_ADDR", ":9999")
 	t.Setenv("LOG_LEVEL", "debug")
 	t.Setenv("DEMO_MODE", "true")
+	t.Setenv("DEMO_TOKEN", "demo-token")
 	t.Setenv("SHUTDOWN_TIMEOUT", "30s")
 
 	cfg, err := Load()

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,11 @@ type LocalChunkStore struct {
 	root string
 }
 
-var _ ChunkStore = (*LocalChunkStore)(nil)
+var (
+	_ ChunkStore = (*LocalChunkStore)(nil)
+	_ Lister     = (*LocalChunkStore)(nil)
+	_ Purger     = (*LocalChunkStore)(nil)
+)
 
 // NewLocalChunkStore prepares root and removes any temp files left behind by
 // a crash. Those are partial writes that were never renamed into place, so
@@ -136,6 +141,53 @@ func (s *LocalChunkStore) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("delete chunk %s: %w", id, err)
 	}
 	return nil
+}
+
+// List returns every published chunk file. Temporary files are ignored.
+func (s *LocalChunkStore) List(ctx context.Context) ([]ChunkInfo, error) {
+	var out []ChunkInfo
+	err := filepath.WalkDir(s.root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() || strings.Contains(entry.Name(), ".tmp-") {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		out = append(out, ChunkInfo{ID: entry.Name(), Size: info.Size(), Modified: info.ModTime()})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list chunk store %s: %w", s.root, err)
+	}
+	return out, nil
+}
+
+// PurgeAll removes every chunk file. It is only used by the demo reset path.
+func (s *LocalChunkStore) PurgeAll(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return fmt.Errorf("read chunk root: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := filepath.Join(s.root, entry.Name())
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("purge chunk dir %s: %w", dir, err)
+		}
+	}
+	return fsyncDir(s.root)
 }
 
 // cleanTemp deletes *.tmp-* files left by writes interrupted mid-flight.

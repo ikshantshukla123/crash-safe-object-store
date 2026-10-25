@@ -49,6 +49,53 @@ type Config struct {
 	PresignKeyID     string
 	PresignSecret    string
 	PresignMaxExpiry time.Duration
+
+	DemoToken string
+
+	MetaCacheTTL     time.Duration
+	SmallObjectLimit int64
+
+	EmbeddingModel string
+	EmbeddingDim   int
+	OpenAIAPIKey   string
+
+	GCInterval    time.Duration
+	GCBatch       int
+	GCOrphanGrace time.Duration
+}
+
+// WorkerConfig configures the background worker process.
+type WorkerConfig struct {
+	Addr                  string
+	LogLevel              slog.Level
+	ShutdownTimeout       time.Duration
+	DatabaseURL           string
+	RedisAddr             string
+	StorageNodes          []StorageNode
+	HealthInterval        time.Duration
+	HealthDownThreshold   int
+	HealthUpThreshold     int
+	ReplicatorBatch       int
+	ReplicatorConcurrency int
+	RepairBatch           int
+	RepairInterval        time.Duration
+	ScrubBatch            int
+	ScrubInterval         time.Duration
+	EmbeddingModel        string
+	EmbeddingDim          int
+	OpenAIAPIKey          string
+}
+
+// ChaosConfig configures the docker-socket chaos controller.
+type ChaosConfig struct {
+	Addr       string
+	DemoMode   bool
+	DemoToken  string
+	DockerHost string
+	APIBaseURL string
+	K6Script   string
+	K6BaseURL  string
+	LogLevel   slog.Level
 }
 
 // NodeConfig is the configuration for one storage node process.
@@ -89,6 +136,7 @@ func Load() (Config, error) {
 	fail(err)
 	cfg.PresignSecret = presignSecret
 	cfg.PresignKeyID = envString("PRESIGN_KEY_ID", "k1")
+	cfg.DemoToken = os.Getenv("DEMO_TOKEN")
 
 	level, err := envLogLevel("LOG_LEVEL", slog.LevelInfo)
 	fail(err)
@@ -136,6 +184,27 @@ func Load() (Config, error) {
 	fail(err)
 	cfg.WALSegmentBytes = walSegment
 
+	cacheTTL, err := envDuration("META_CACHE_TTL", 60*time.Second)
+	fail(err)
+	cfg.MetaCacheTTL = cacheTTL
+	smallLimit, err := envInt64("SMALL_OBJECT_CACHE_LIMIT_BYTES", 1<<20)
+	fail(err)
+	cfg.SmallObjectLimit = smallLimit
+
+	cfg.EmbeddingModel = envString("EMBEDDING_MODEL", "text-embedding-3-small")
+	cfg.EmbeddingDim, err = envInt("EMBEDDING_DIM", 1536)
+	fail(err)
+	cfg.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
+
+	gcInterval, err := envDuration("GC_INTERVAL", time.Hour)
+	fail(err)
+	cfg.GCInterval = gcInterval
+	cfg.GCBatch, err = envInt("GC_BATCH", 100)
+	fail(err)
+	gcGrace, err := envDuration("GC_ORPHAN_GRACE", 24*time.Hour)
+	fail(err)
+	cfg.GCOrphanGrace = gcGrace
+
 	if cfg.ReplicasN <= 0 {
 		fail(errors.New("REPLICAS_N must be positive"))
 	}
@@ -147,6 +216,12 @@ func Load() (Config, error) {
 	}
 	if cfg.WALSegmentBytes <= 0 {
 		fail(errors.New("WAL_SEGMENT_BYTES must be positive"))
+	}
+	if cfg.DemoMode && cfg.DemoToken == "" {
+		fail(errors.New("DEMO_TOKEN is required when DEMO_MODE is true"))
+	}
+	if cfg.SmallObjectLimit < 0 {
+		fail(errors.New("SMALL_OBJECT_CACHE_LIMIT_BYTES must not be negative"))
 	}
 
 	if len(errs) > 0 {
@@ -182,6 +257,95 @@ func LoadNode() (NodeConfig, error) {
 	}
 	if len(errs) > 0 {
 		return NodeConfig{}, fmt.Errorf("load node config: %w", errors.Join(errs...))
+	}
+	return cfg, nil
+}
+
+// LoadWorkers reads worker-process configuration.
+func LoadWorkers() (WorkerConfig, error) {
+	var errs []error
+	fail := func(err error) {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	cfg := WorkerConfig{
+		Addr:           envString("WORKER_ADDR", ":8092"),
+		RedisAddr:      envString("REDIS_ADDR", "localhost:6379"),
+		EmbeddingModel: envString("EMBEDDING_MODEL", "text-embedding-3-small"),
+		OpenAIAPIKey:   os.Getenv("OPENAI_API_KEY"),
+	}
+	dbURL, err := envRequired("DATABASE_URL")
+	fail(err)
+	cfg.DatabaseURL = dbURL
+	level, err := envLogLevel("LOG_LEVEL", slog.LevelInfo)
+	fail(err)
+	cfg.LogLevel = level
+	timeout, err := envDuration("SHUTDOWN_TIMEOUT", 15*time.Second)
+	fail(err)
+	cfg.ShutdownTimeout = timeout
+	nodes, err := parseStorageNodes(envString("STORAGE_NODES", "node1=http://localhost:9001,node2=http://localhost:9002,node3=http://localhost:9003"))
+	fail(err)
+	cfg.StorageNodes = nodes
+	cfg.HealthInterval, err = envDuration("HEALTH_INTERVAL", 2*time.Second)
+	fail(err)
+	cfg.HealthDownThreshold, err = envInt("HEALTH_DOWN_THRESHOLD", 3)
+	fail(err)
+	cfg.HealthUpThreshold, err = envInt("HEALTH_UP_THRESHOLD", 2)
+	fail(err)
+	cfg.ReplicatorBatch, err = envInt("REPLICATOR_BATCH", 50)
+	fail(err)
+	cfg.ReplicatorConcurrency, err = envInt("REPLICATOR_CONCURRENCY", 4)
+	fail(err)
+	cfg.RepairBatch, err = envInt("REPAIR_BATCH", 20)
+	fail(err)
+	cfg.RepairInterval, err = envDuration("REPAIR_INTERVAL", 15*time.Second)
+	fail(err)
+	cfg.ScrubBatch, err = envInt("SCRUB_BATCH", 50)
+	fail(err)
+	cfg.ScrubInterval, err = envDuration("SCRUB_INTERVAL", 30*time.Second)
+	fail(err)
+	cfg.EmbeddingDim, err = envInt("EMBEDDING_DIM", 1536)
+	fail(err)
+	if cfg.HealthInterval <= 0 || cfg.ReplicatorBatch <= 0 || cfg.ReplicatorConcurrency <= 0 || cfg.ScrubBatch <= 0 {
+		fail(errors.New("worker intervals and batch sizes must be positive"))
+	}
+	if len(errs) > 0 {
+		return WorkerConfig{}, fmt.Errorf("load worker config: %w", errors.Join(errs...))
+	}
+	return cfg, nil
+}
+
+// LoadChaos reads chaos-controller configuration. It refuses to run unless
+// DEMO_MODE=true, because it mounts the Docker socket.
+func LoadChaos() (ChaosConfig, error) {
+	cfg := ChaosConfig{
+		Addr:       envString("CHAOS_ADDR", ":8090"),
+		DockerHost: envString("DOCKER_HOST", "unix:///var/run/docker.sock"),
+		APIBaseURL: envString("API_BASE_URL", "http://api:8080"),
+		K6Script:   envString("K6_SCRIPT", "/etc/chaos/loadtest.js"),
+		K6BaseURL:  envString("K6_BASE_URL", "http://api:8080"),
+	}
+	var errs []error
+	demo, err := envBool("DEMO_MODE", false)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	cfg.DemoMode = demo
+	cfg.DemoToken = os.Getenv("DEMO_TOKEN")
+	level, err := envLogLevel("LOG_LEVEL", slog.LevelInfo)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	cfg.LogLevel = level
+	if !demo {
+		errs = append(errs, errors.New("DEMO_MODE must be true for the chaos controller"))
+	}
+	if cfg.DemoToken == "" {
+		errs = append(errs, errors.New("DEMO_TOKEN is required"))
+	}
+	if len(errs) > 0 {
+		return ChaosConfig{}, fmt.Errorf("load chaos config: %w", errors.Join(errs...))
 	}
 	return cfg, nil
 }
@@ -288,4 +452,20 @@ func envLogLevel(key string, def slog.Level) (slog.Level, error) {
 		return 0, fmt.Errorf("%s must be debug, info, warn or error, got %q: %w", key, raw, err)
 	}
 	return level, nil
+}
+
+// APIBaseURLContainer is the compose container name for the API.
+func (c ChaosConfig) APIBaseURLContainer() string {
+	if name := os.Getenv("API_CONTAINER"); name != "" {
+		return name
+	}
+	return "objstore-api"
+}
+
+// NodeContainerPrefix is the shared prefix of node containers.
+func (c ChaosConfig) NodeContainerPrefix() string {
+	if name := os.Getenv("NODE_CONTAINER_PREFIX"); name != "" {
+		return name
+	}
+	return "objstore-node"
 }

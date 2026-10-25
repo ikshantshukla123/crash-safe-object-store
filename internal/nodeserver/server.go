@@ -40,6 +40,35 @@ func Handler(store objects.ChunkStore, dataRoot string, log *slog.Logger) http.H
 		})
 	})
 
+	r.Get("/chunks", func(w http.ResponseWriter, r *http.Request) {
+		lister, ok := store.(objects.Lister)
+		if !ok {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "listing not supported"})
+			return
+		}
+		chunks, err := lister.List(r.Context())
+		if err != nil {
+			log.ErrorContext(r.Context(), "list chunks", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"chunks": chunks})
+	})
+
+	r.Delete("/chunks", func(w http.ResponseWriter, r *http.Request) {
+		purger, ok := store.(objects.Purger)
+		if !ok {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "purge not supported"})
+			return
+		}
+		if err := purger.PurgeAll(r.Context()); err != nil {
+			log.ErrorContext(r.Context(), "purge chunks", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	r.Put("/chunks/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		want := r.Header.Get("X-Chunk-SHA256")

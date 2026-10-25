@@ -2,6 +2,7 @@ package objects
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +19,11 @@ type NodeClient struct {
 	HTTP    *http.Client
 }
 
-var _ ChunkStore = (*NodeClient)(nil)
+var (
+	_ ChunkStore = (*NodeClient)(nil)
+	_ Lister     = (*NodeClient)(nil)
+	_ Purger     = (*NodeClient)(nil)
+)
 
 func NewNodeClient(id, name, baseURL string) *NodeClient {
 	return &NodeClient{
@@ -92,6 +97,46 @@ func (c *NodeClient) Delete(ctx context.Context, id string) error {
 		return nil
 	}
 	return fmt.Errorf("delete chunk %s from %s: unexpected status %d", id, c.Name, resp.StatusCode)
+}
+
+// List returns the node's stored chunk files.
+func (c *NodeClient) List(ctx context.Context) ([]ChunkInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/chunks", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list chunks from %s: %w", c.Name, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("list chunks from %s: status %d", c.Name, resp.StatusCode)
+	}
+	var body struct {
+		Chunks []ChunkInfo `json:"chunks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, fmt.Errorf("decode chunks from %s: %w", c.Name, err)
+	}
+	return body.Chunks, nil
+}
+
+// PurgeAll removes every chunk from the node (demo reset only).
+func (c *NodeClient) PurgeAll(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+"/chunks", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("purge chunks on %s: %w", c.Name, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("purge chunks on %s: status %d", c.Name, resp.StatusCode)
+	}
+	return nil
 }
 
 // Healthy reports whether the node answers its health endpoint.

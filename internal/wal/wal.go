@@ -21,6 +21,7 @@ type request struct {
 	payload []byte
 	sync    bool
 	close   bool
+	reset   bool
 	resp    chan response
 	result  response
 }
@@ -185,6 +186,10 @@ func (l *Log) append(ctx context.Context, typ RecordType, payload any, sync bool
 func (l *Log) run() {
 	defer close(l.done)
 	for req := range l.reqCh {
+		if req.reset {
+			req.resp <- response{err: l.reset()}
+			continue
+		}
 		if req.close {
 			l.finishClose(req)
 			return
@@ -265,6 +270,54 @@ func (l *Log) failAll(err error, batch []request) {
 	}
 	l.sendAll(batch)
 	l.fatal(err)
+}
+
+// Reset clears every segment and starts a fresh one. It is only for the demo
+// reset button; the caller must quiesce writes first. LSNs keep increasing.
+func (l *Log) Reset(ctx context.Context) error {
+	if l.closed.Load() {
+		return ErrClosed
+	}
+	resp := make(chan response, 1)
+	select {
+	case l.reqCh <- request{reset: true, resp: resp}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-l.done:
+		return ErrClosed
+	}
+	select {
+	case r := <-resp:
+		return r.err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-l.done:
+		return ErrClosed
+	}
+}
+
+func (l *Log) reset() error {
+	if l.file != nil {
+		if err := l.file.Sync(); err != nil {
+			return fmt.Errorf("fsync wal before reset: %w", err)
+		}
+		if err := l.file.Close(); err != nil {
+			return fmt.Errorf("close wal before reset: %w", err)
+		}
+		l.file = nil
+	}
+	segments, err := ListSegments(l.dir)
+	if err != nil {
+		return err
+	}
+	for _, path := range segments {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove wal segment %s: %w", path, err)
+		}
+	}
+	l.seq = 0
+	l.fileSize = 0
+	return l.createSegment()
 }
 
 func (l *Log) finishClose(req request) {
