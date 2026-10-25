@@ -171,7 +171,8 @@ GitHub Actions (`.github/workflows/deploy.yml`) builds and pushes five images
 to GHCR, then SSHes to the host, checks out the same SHA, runs the migration
 one-shot, pulls, restarts and runs `deploy/smoke.sh`. Required repository
 secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, and optionally
-`GHCR_USER` / `GHCR_TOKEN`. Required variable: `SITE_ADDRESS`.
+`GHCR_USER` / `GHCR_TOKEN`. Required variables: `SITE_ADDRESS` and
+`DEPLOY_ENABLED=true` (deploy is skipped until the host is configured).
 
 The host needs a `.env` with `chmod 600` (never committed) containing the
 database password, JWT secret, presign secret, demo token, TLS email and image

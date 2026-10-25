@@ -63,6 +63,9 @@ jobs:
 
   deploy:
     needs: build
+    # Builds still publish images on every main commit. Set the repository
+    # variable DEPLOY_ENABLED=true only after the host secrets exist.
+    if: vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     environment: production
     env:
